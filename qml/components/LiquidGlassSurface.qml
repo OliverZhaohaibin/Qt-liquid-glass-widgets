@@ -331,16 +331,32 @@ Item {
                     float n2 = noise2D(uv * 8.0 - time * 0.2);
                     vec2 noiseOffset = vec2(n1 - 0.5, n2 - 0.5) * noise * 0.5;
                     
-                    // === Chromatic Aberration (Color Dispersion) ===
-                    // Different wavelengths refract differently - RGB channels separate at edges
-                    float aberrationStrength = distortion * 3.0 * (0.3 + distFromCenter * 1.5);
+                    // === Real-time Edge Chromatic Dispersion ===
+                    // Stronger chromatic aberration at edges, calculated in real-time
+                    // Edge distance factor - stronger dispersion at glass perimeter
+                    float edgeDispersionFactor = pow(distFromCenter * 2.0, 1.5);
+                    edgeDispersionFactor = clamp(edgeDispersionFactor, 0.0, 1.0);
+                    
+                    // Dynamic time-based modulation for living glass effect
+                    float timeModulation = 1.0 + 0.1 * sin(time * 2.0 + distFromCenter * 6.0);
+                    
+                    // Chromatic aberration strength increases toward edges
+                    // Base strength + edge-dependent strength + time modulation
+                    float aberrationStrength = (distortion * 2.0 + edgeDispersionFactor * 0.08) * timeModulation;
+                    
+                    // Direction of dispersion - radial from center
                     // Add NORMALIZE_EPSILON to prevent NaN when delta is zero (at exact center)
                     vec2 aberrationDir = normalize(delta + vec2(NORMALIZE_EPSILON));
                     
-                    // Sample each color channel with slightly different offsets
-                    vec2 uvR = refractedUV + noiseOffset + aberrationDir * aberrationStrength * 1.0;
-                    vec2 uvG = refractedUV + noiseOffset;
-                    vec2 uvB = refractedUV + noiseOffset - aberrationDir * aberrationStrength * 1.0;
+                    // Different wavelengths refract at different angles
+                    // Red refracts least, Blue refracts most (like real prism dispersion)
+                    float redOffset = aberrationStrength * 0.8;   // Red - least refraction
+                    float blueOffset = -aberrationStrength * 1.2; // Blue - most refraction
+                    
+                    // Sample each color channel with wavelength-dependent offsets
+                    vec2 uvR = refractedUV + noiseOffset + aberrationDir * redOffset;
+                    vec2 uvG = refractedUV + noiseOffset; // Green - middle (reference, no offset)
+                    vec2 uvB = refractedUV + noiseOffset + aberrationDir * blueOffset;
                     
                     // Clamp UVs to valid range
                     uvR = clamp(uvR, 0.0, 1.0);
@@ -353,13 +369,33 @@ Item {
                     float b = texture(source, uvB).b;
                     vec3 bgColor = vec3(r, g, b);
                     
+                    // === Edge Dispersion Highlight ===
+                    // Add subtle rainbow fringe at edges for visible dispersion effect
+                    vec3 dispersionTint = vec3(0.0);
+                    if (edgeDispersionFactor > 0.3) {
+                        // Create rainbow gradient based on angle around center
+                        float angle = atan(delta.y, delta.x);
+                        float hue = (angle + 3.14159) / (2.0 * 3.14159); // 0-1
+                        
+                        // Convert hue to RGB (simplified HSV to RGB)
+                        vec3 rainbow;
+                        rainbow.r = abs(hue * 6.0 - 3.0) - 1.0;
+                        rainbow.g = 2.0 - abs(hue * 6.0 - 2.0);
+                        rainbow.b = 2.0 - abs(hue * 6.0 - 4.0);
+                        rainbow = clamp(rainbow, 0.0, 1.0);
+                        
+                        // Subtle dispersion tint at edges
+                        float dispersionIntensity = (edgeDispersionFactor - 0.3) * 0.15 * highlight;
+                        dispersionTint = rainbow * dispersionIntensity;
+                    }
+                    
                     // === Fresnel Edge Effect ===
                     // Glass edges appear brighter due to internal reflection
                     float edgeFactor = pow(distFromCenter * 1.8, fresnel);
                     edgeFactor = clamp(edgeFactor, 0.0, 1.0);
                     
-                    // Smooth edge highlight following glass perimeter
-                    vec3 fresnelGlow = edgeColor.rgb * edgeFactor * highlight * 0.8;
+                    // Smooth edge highlight following glass perimeter (white, not colored)
+                    vec3 fresnelGlow = vec3(1.0) * edgeFactor * highlight * 0.6;
                     
                     // === Inner Highlight / Caustic Effect ===
                     // Simulates light focusing through the lens
@@ -380,7 +416,10 @@ Item {
                     // Base glass color with subtle tint
                     vec3 glassColor = mix(bgColor, tint.rgb, tintStr * 0.5);
                     
-                    // Add fresnel edge glow
+                    // Add edge dispersion rainbow tint
+                    glassColor += dispersionTint;
+                    
+                    // Add fresnel edge glow (white)
                     glassColor += fresnelGlow;
                     
                     // Add caustic/inner highlights
@@ -429,29 +468,6 @@ Item {
             id: contentContainer
             anchors.fill: parent
             anchors.margins: 1  // Slight inset to avoid edge clipping
-        }
-    }
-    
-    // ============================================================
-    // Focus Ring (for accessibility)
-    // ============================================================
-    
-    Rectangle {
-        id: focusRing
-        anchors.fill: parent
-        anchors.margins: -Tokens.focusRingWidth
-        radius: cornerRadius + Tokens.focusRingWidth
-        color: "transparent"
-        border.color: Tokens.focusRingColor
-        border.width: Tokens.focusRingWidth
-        visible: root.activeFocus
-        opacity: root.activeFocus ? 1.0 : 0.0
-        
-        Behavior on opacity {
-            NumberAnimation {
-                duration: Tokens.durationFast
-                easing.type: Tokens.easingStandard
-            }
         }
     }
 }

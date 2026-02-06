@@ -164,22 +164,6 @@ AbstractButton {
             
             // No harsh sweep or ripple effects - the glass shader handles all visual effects
         }
-        
-        // Focus ring (only for keyboard navigation, not border)
-        Rectangle {
-            anchors.fill: parent
-            anchors.margins: -Tokens.focusRingWidth - 2
-            radius: root.cornerRadius + Tokens.focusRingWidth + 2
-            color: "transparent"
-            border.color: Tokens.focusRingColor
-            border.width: Tokens.focusRingWidth
-            visible: root.activeFocus
-            opacity: root.activeFocus ? 1.0 : 0.0
-            
-            Behavior on opacity {
-                NumberAnimation { duration: Tokens.durationFast }
-            }
-        }
     }
     
     // ============================================================
