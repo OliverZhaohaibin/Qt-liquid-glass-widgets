@@ -220,6 +220,7 @@ ApplicationWindow {
                             }
                             
                             LG.LiquidGlassSlider {
+                                id: volumeSlider
                                 Layout.fillWidth: true
                                 backgroundSource: backgroundContent
                                 from: 0
@@ -229,7 +230,7 @@ ApplicationWindow {
                             }
                             
                             Text {
-                                text: Math.round(parent.children[1].value) + "%"
+                                text: Math.round(volumeSlider.value) + "%"
                                 color: LG.Tokens.textPrimary
                                 font.pixelSize: 13
                                 Layout.preferredWidth: 40
@@ -248,6 +249,7 @@ ApplicationWindow {
                             }
                             
                             LG.LiquidGlassSlider {
+                                id: brightnessSlider
                                 Layout.fillWidth: true
                                 backgroundSource: backgroundContent
                                 from: 0
@@ -257,7 +259,7 @@ ApplicationWindow {
                             }
                             
                             Text {
-                                text: Math.round(parent.children[1].value) + "%"
+                                text: Math.round(brightnessSlider.value) + "%"
                                 color: LG.Tokens.textPrimary
                                 font.pixelSize: 13
                                 Layout.preferredWidth: 40

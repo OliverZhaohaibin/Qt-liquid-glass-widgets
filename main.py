@@ -13,7 +13,7 @@ import sys
 import os
 from pathlib import Path
 
-from PySide6.QtCore import QUrl, QCoreApplication
+from PySide6.QtCore import Qt, QUrl, QCoreApplication
 from PySide6.QtGui import QGuiApplication, QSurfaceFormat
 from PySide6.QtQml import QQmlApplicationEngine
 
@@ -30,9 +30,7 @@ def setup_opengl():
 
 def main():
     # Set application attributes before creating QGuiApplication
-    QCoreApplication.setAttribute(
-        __import__('PySide6.QtCore', fromlist=['Qt']).Qt.AA_ShareOpenGLContexts
-    )
+    QCoreApplication.setAttribute(Qt.AA_ShareOpenGLContexts)
     
     setup_opengl()
     

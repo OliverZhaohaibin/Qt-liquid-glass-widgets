@@ -114,7 +114,7 @@ Item {
         layer.effect: MultiEffect {
             shadowEnabled: true
             shadowColor: root.shadowColor
-            shadowBlur: root.elevation / 64 * 1.0  // Normalize to 0-1 range
+            shadowBlur: Math.min(root.elevation / 64, 1.0)  // Normalize to 0-1 range, clamped
             shadowVerticalOffset: root.elevation / 2
             shadowHorizontalOffset: 0
             shadowOpacity: 0.5

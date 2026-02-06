@@ -10,7 +10,7 @@ QtObject {
     // Quality Presets (Low/Medium/High) - affects performance
     // ============================================================
     enum QualityPreset { Low, Medium, High }
-    property int qualityPreset: Tokens.QualityPreset.High
+    property int qualityPreset: 2  // Default to High (enum value 2)
 
     // Computed values based on quality preset
     readonly property real downsampleFactor: {
