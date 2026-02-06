@@ -205,7 +205,8 @@ Item {
         }
         
         // ============================================================
-        // Glass Shader Effect - Refraction, Fresnel, Highlights
+        // Glass Shader Effect - Lens Distortion, Chromatic Aberration, Fresnel
+        // Creates realistic glass volume with edge highlights and color dispersion
         // ============================================================
         
         ShaderEffect {
@@ -227,6 +228,7 @@ Item {
             property real hoverState: root.hovered ? 1.0 : 0.0
             property real pressState: root.pressed ? 1.0 : 0.0
             property point resolution: Qt.point(root.width, root.height)
+            property real cornerRad: root.cornerRadius / Math.min(root.width, root.height)
             
             // ========================================================
             // VERTEX SHADER
@@ -247,7 +249,8 @@ Item {
             "
             
             // ========================================================
-            // FRAGMENT SHADER - Glass Material
+            // FRAGMENT SHADER - Realistic Glass Lens Effect
+            // Features: Lens distortion, chromatic aberration, fresnel edges
             // ========================================================
             fragmentShader: "
                 #version 440
@@ -276,14 +279,18 @@ Item {
                     float hoverState;
                     float pressState;
                     vec2 resolution;
+                    float cornerRad;
                 };
                 
-                // Simplex noise function for distortion
-                // Returns value in range [-1, 1]
+                // Hash function for noise
                 float hash(vec2 p) {
                     return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
                 }
                 
+                // Small epsilon to prevent division by zero when normalizing vectors near center
+                const float NORMALIZE_EPSILON = 0.001;
+                
+                // 2D noise function
                 float noise2D(vec2 p) {
                     vec2 i = floor(p);
                     vec2 f = fract(p);
@@ -297,57 +304,100 @@ Item {
                     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
                 }
                 
+                // Lens distortion function - creates convex glass effect
+                vec2 lensDistort(vec2 uv, float strength) {
+                    vec2 center = vec2(0.5);
+                    vec2 delta = uv - center;
+                    float dist = length(delta);
+                    
+                    // Barrel distortion for convex lens effect
+                    float distortAmount = 1.0 + strength * dist * dist;
+                    return center + delta * distortAmount;
+                }
+                
                 void main() {
                     vec2 uv = texCoord;
+                    vec2 center = vec2(0.5);
+                    vec2 delta = uv - center;
+                    float distFromCenter = length(delta);
                     
-                    // === Distortion Effect ===
-                    // Procedural noise-based refraction
-                    float n1 = noise2D(uv * 8.0 + time * 0.5);
-                    float n2 = noise2D(uv * 12.0 - time * 0.3);
-                    vec2 distortOffset = vec2(n1 - 0.5, n2 - 0.5) * distortion;
+                    // === Lens Refraction Effect ===
+                    // Center refraction - objects appear magnified/displaced through glass
+                    float lensStrength = distortion * 2.0;
+                    vec2 refractedUV = lensDistort(uv, lensStrength);
                     
-                    // Add pointer-based distortion on hover/press
-                    vec2 pointerDir = uv - pointer;
-                    float pointerDist = length(pointerDir);
-                    float pointerInfluence = (1.0 - smoothstep(0.0, 0.5, pointerDist));
-                    distortOffset += pointerDir * pointerInfluence * distortion * (hoverState * 0.5 + pressState * 1.0);
+                    // Add subtle noise-based distortion for organic glass feel
+                    float n1 = noise2D(uv * 6.0 + time * 0.3);
+                    float n2 = noise2D(uv * 8.0 - time * 0.2);
+                    vec2 noiseOffset = vec2(n1 - 0.5, n2 - 0.5) * noise * 0.5;
                     
-                    // Sample background with distortion
-                    vec2 sampleUV = uv + distortOffset;
-                    vec4 bgColor = texture(source, clamp(sampleUV, 0.0, 1.0));
+                    // === Chromatic Aberration (Color Dispersion) ===
+                    // Different wavelengths refract differently - RGB channels separate at edges
+                    float aberrationStrength = distortion * 3.0 * (0.3 + distFromCenter * 1.5);
+                    // Add NORMALIZE_EPSILON to prevent NaN when delta is zero (at exact center)
+                    vec2 aberrationDir = normalize(delta + vec2(NORMALIZE_EPSILON));
+                    
+                    // Sample each color channel with slightly different offsets
+                    vec2 uvR = refractedUV + noiseOffset + aberrationDir * aberrationStrength * 1.0;
+                    vec2 uvG = refractedUV + noiseOffset;
+                    vec2 uvB = refractedUV + noiseOffset - aberrationDir * aberrationStrength * 1.0;
+                    
+                    // Clamp UVs to valid range
+                    uvR = clamp(uvR, 0.0, 1.0);
+                    uvG = clamp(uvG, 0.0, 1.0);
+                    uvB = clamp(uvB, 0.0, 1.0);
+                    
+                    // Sample background with chromatic aberration
+                    float r = texture(source, uvR).r;
+                    float g = texture(source, uvG).g;
+                    float b = texture(source, uvB).b;
+                    vec3 bgColor = vec3(r, g, b);
                     
                     // === Fresnel Edge Effect ===
-                    // Calculate edge factor (stronger at edges)
-                    vec2 centered = uv * 2.0 - 1.0;
-                    float edgeDist = max(abs(centered.x), abs(centered.y));
-                    float edgeFactor = pow(edgeDist, fresnel);
+                    // Glass edges appear brighter due to internal reflection
+                    float edgeFactor = pow(distFromCenter * 1.8, fresnel);
+                    edgeFactor = clamp(edgeFactor, 0.0, 1.0);
                     
-                    // === Specular Highlight ===
-                    // Moving highlight based on pointer position
-                    vec2 highlightPos = mix(vec2(0.3, 0.2), pointer, hoverState * 0.5);
-                    float highlightDist = length(uv - highlightPos);
-                    float specular = exp(-highlightDist * highlightDist * 8.0) * highlight;
+                    // Smooth edge highlight following glass perimeter
+                    vec3 fresnelGlow = edgeColor.rgb * edgeFactor * highlight * 0.8;
                     
-                    // Add a secondary highlight for depth
-                    vec2 highlight2Pos = vec2(1.0 - highlightPos.x, 1.0 - highlightPos.y);
-                    float highlight2Dist = length(uv - highlight2Pos);
-                    float specular2 = exp(-highlight2Dist * highlight2Dist * 12.0) * highlight * 0.3;
+                    // === Inner Highlight / Caustic Effect ===
+                    // Simulates light focusing through the lens
+                    float caustic = exp(-distFromCenter * distFromCenter * 6.0) * highlight * 0.3;
+                    
+                    // Secondary caustic ring
+                    float ring = smoothstep(0.3, 0.35, distFromCenter) * smoothstep(0.45, 0.4, distFromCenter);
+                    caustic += ring * highlight * 0.15;
+                    
+                    // === Edge Highlight Arc ===
+                    // Top-left light source creates arc highlight
+                    vec2 lightDir = normalize(vec2(-0.5, -0.7));
+                    // Add NORMALIZE_EPSILON to prevent NaN when delta is zero (at exact center)
+                    float lightAngle = dot(normalize(delta + vec2(NORMALIZE_EPSILON)), lightDir);
+                    float arcHighlight = pow(max(0.0, lightAngle), 3.0) * edgeFactor * highlight * 0.6;
                     
                     // === Combine Effects ===
-                    // Base glass color with tint
-                    vec3 glassColor = mix(bgColor.rgb, tint.rgb, tintStr);
+                    // Base glass color with subtle tint
+                    vec3 glassColor = mix(bgColor, tint.rgb, tintStr * 0.5);
                     
-                    // Add fresnel edge highlight
-                    vec3 fresnelHighlight = edgeColor.rgb * edgeFactor * highlight;
-                    glassColor += fresnelHighlight;
+                    // Add fresnel edge glow
+                    glassColor += fresnelGlow;
                     
-                    // Add specular highlights
-                    glassColor += vec3(1.0) * (specular + specular2);
+                    // Add caustic/inner highlights
+                    glassColor += vec3(1.0) * caustic;
                     
-                    // Apply base opacity
-                    float finalAlpha = mix(opacity_, min(opacity_ + 0.1, 1.0), edgeFactor);
+                    // Add arc highlight
+                    glassColor += vec3(1.0, 0.98, 0.95) * arcHighlight;
                     
-                    fragColor = vec4(glassColor, finalAlpha) * qt_Opacity;
+                    // === Glass Volume Opacity ===
+                    // Edges slightly more opaque (thicker glass)
+                    float volumeOpacity = opacity_ + edgeFactor * 0.15;
+                    
+                    // Center slightly more transparent (thinner/clearer)
+                    volumeOpacity -= (1.0 - distFromCenter) * 0.05;
+                    volumeOpacity = clamp(volumeOpacity, 0.1, 0.95);
+                    
+                    fragColor = vec4(glassColor, volumeOpacity) * qt_Opacity;
                 }
             "
         }

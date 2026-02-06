@@ -128,9 +128,9 @@ QtObject {
     property real hoverScaleBoost: 1.02
     property real hoverDistortionBoost: 0.005
     
-    // Pressed state modifications
+    // Pressed state modifications - elastic expansion effect
+    property real pressedScaleExpand: 1.08  // Button expands on press
     property real pressedHighlightBoost: 0.5
-    property real pressedScaleBoost: 0.98
     property real pressedDistortionBoost: 0.01
     
     // Disabled state modifications
