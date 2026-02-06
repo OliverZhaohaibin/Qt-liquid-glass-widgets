@@ -315,125 +315,115 @@ Item {
                     return center + delta * distortAmount;
                 }
                 
+                vec3 sampleBackground(vec2 uv) {
+                    return texture(source, clamp(uv, 0.0, 1.0)).rgb;
+                }
+
                 void main() {
                     vec2 uv = texCoord;
-                    vec2 center = vec2(0.5);
+                    vec2 center = mix(vec2(0.5), pointer, 0.15 * hoverState + 0.08 * pressState);
                     vec2 delta = uv - center;
                     float distFromCenter = length(delta);
                     
-                    // === Lens Refraction Effect ===
-                    // Center refraction - objects appear magnified/displaced through glass
-                    float lensStrength = distortion * 2.0;
-                    vec2 refractedUV = lensDistort(uv, lensStrength);
+                    // === Lens Refraction Model ===
+                    // Create a convex surface normal (pseudo-sphere)
+                    vec2 sphereCoord = delta * 2.0;
+                    float radiusSq = dot(sphereCoord, sphereCoord);
+                    float height = sqrt(max(1.0 - radiusSq, 0.0));
+                    float curvature = 0.65 + distortion * 8.0;
+                    vec3 normal = normalize(vec3(sphereCoord * curvature, height));
                     
-                    // Add subtle noise-based distortion for organic glass feel
+                    // Add subtle noise-based micro-surface distortion for organic glass feel
                     float n1 = noise2D(uv * 6.0 + time * 0.3);
                     float n2 = noise2D(uv * 8.0 - time * 0.2);
-                    vec2 noiseOffset = vec2(n1 - 0.5, n2 - 0.5) * noise * 0.5;
+                    vec2 noiseOffset = vec2(n1 - 0.5, n2 - 0.5) * noise * 0.6;
+                    normal.xy += noiseOffset * 0.35;
+                    normal = normalize(normal);
                     
                     // === Real-time Edge Chromatic Dispersion ===
-                    // Stronger chromatic aberration at edges, calculated in real-time
-                    // Edge distance factor - stronger dispersion at glass perimeter
-                    float edgeDispersionFactor = pow(distFromCenter * 2.0, 1.5);
-                    edgeDispersionFactor = clamp(edgeDispersionFactor, 0.0, 1.0);
+                    // Stronger dispersion at the perimeter
+                    float edgeDispersionFactor = smoothstep(0.2, 0.95, distFromCenter * 1.4);
+                    float timeModulation = 1.0 + 0.12 * sin(time * 2.0 + distFromCenter * 6.0);
                     
-                    // Dynamic time-based modulation for living glass effect
-                    float timeModulation = 1.0 + 0.1 * sin(time * 2.0 + distFromCenter * 6.0);
+                    // Base IOR with subtle edge-dependent dispersion
+                    float iorBase = 1.08 + distortion * 4.0;
+                    float iorR = iorBase - edgeDispersionFactor * 0.010;
+                    float iorG = iorBase;
+                    float iorB = iorBase + edgeDispersionFactor * 0.018;
                     
-                    // Chromatic aberration strength increases toward edges
-                    // Base strength + edge-dependent strength + time modulation
-                    float aberrationStrength = (distortion * 2.0 + edgeDispersionFactor * 0.08) * timeModulation;
+                    vec3 viewDir = vec3(0.0, 0.0, 1.0);
+                    vec3 refrR = refract(-viewDir, normal, 1.0 / iorR);
+                    vec3 refrG = refract(-viewDir, normal, 1.0 / iorG);
+                    vec3 refrB = refract(-viewDir, normal, 1.0 / iorB);
                     
-                    // Direction of dispersion - radial from center
-                    // Add NORMALIZE_EPSILON to prevent NaN when delta is zero (at exact center)
-                    vec2 aberrationDir = normalize(delta + vec2(NORMALIZE_EPSILON));
+                    float refractionScale = (0.035 + distortion * 1.4) * timeModulation;
+                    vec2 uvR = uv + refrR.xy / max(refrR.z, NORMALIZE_EPSILON) * refractionScale + noiseOffset;
+                    vec2 uvG = uv + refrG.xy / max(refrG.z, NORMALIZE_EPSILON) * refractionScale + noiseOffset;
+                    vec2 uvB = uv + refrB.xy / max(refrB.z, NORMALIZE_EPSILON) * refractionScale + noiseOffset;
                     
-                    // Different wavelengths refract at different angles
-                    // Red refracts least, Blue refracts most (like real prism dispersion)
-                    float redOffset = aberrationStrength * 0.8;   // Red - least refraction
-                    float blueOffset = -aberrationStrength * 1.2; // Blue - most refraction
+                    // Slight lens distortion to keep the volume effect
+                    vec2 lensUV = lensDistort(uv, distortion * 1.8);
+                    uvR = mix(uvR, lensUV, 0.2);
+                    uvG = mix(uvG, lensUV, 0.2);
+                    uvB = mix(uvB, lensUV, 0.2);
                     
-                    // Sample each color channel with wavelength-dependent offsets
-                    vec2 uvR = refractedUV + noiseOffset + aberrationDir * redOffset;
-                    vec2 uvG = refractedUV + noiseOffset; // Green - middle (reference, no offset)
-                    vec2 uvB = refractedUV + noiseOffset + aberrationDir * blueOffset;
+                    vec3 refractedColor = vec3(
+                        sampleBackground(uvR).r,
+                        sampleBackground(uvG).g,
+                        sampleBackground(uvB).b
+                    );
                     
-                    // Clamp UVs to valid range
-                    uvR = clamp(uvR, 0.0, 1.0);
-                    uvG = clamp(uvG, 0.0, 1.0);
-                    uvB = clamp(uvB, 0.0, 1.0);
-                    
-                    // Sample background with chromatic aberration
-                    float r = texture(source, uvR).r;
-                    float g = texture(source, uvG).g;
-                    float b = texture(source, uvB).b;
-                    vec3 bgColor = vec3(r, g, b);
+                    // === Micro diffusion for realistic glass softness ===
+                    float diffusion = clamp(opacity_ + distortion * 2.0, 0.0, 1.0);
+                    vec2 blurStep = vec2(0.0025 + diffusion * 0.004);
+                    vec3 softSample = (
+                        sampleBackground(uv + blurStep) +
+                        sampleBackground(uv - blurStep) +
+                        sampleBackground(uv + vec2(blurStep.x, -blurStep.y)) +
+                        sampleBackground(uv + vec2(-blurStep.x, blurStep.y))
+                    ) * 0.25;
+                    vec3 bgColor = mix(refractedColor, softSample, diffusion * 0.35);
                     
                     // === Edge Dispersion Highlight ===
-                    // Add subtle rainbow fringe at edges for visible dispersion effect
                     vec3 dispersionTint = vec3(0.0);
-                    if (edgeDispersionFactor > 0.3) {
-                        // Create rainbow gradient based on angle around center
+                    if (edgeDispersionFactor > 0.2) {
                         float angle = atan(delta.y, delta.x);
-                        float hue = (angle + 3.14159) / (2.0 * 3.14159); // 0-1
-                        
-                        // Convert hue to RGB (simplified HSV to RGB)
+                        float hue = (angle + 3.14159) / (2.0 * 3.14159);
                         vec3 rainbow;
                         rainbow.r = abs(hue * 6.0 - 3.0) - 1.0;
                         rainbow.g = 2.0 - abs(hue * 6.0 - 2.0);
                         rainbow.b = 2.0 - abs(hue * 6.0 - 4.0);
                         rainbow = clamp(rainbow, 0.0, 1.0);
-                        
-                        // Subtle dispersion tint at edges
-                        float dispersionIntensity = (edgeDispersionFactor - 0.3) * 0.15 * highlight;
+                        float dispersionIntensity = (edgeDispersionFactor - 0.2) * 0.22 * highlight;
                         dispersionTint = rainbow * dispersionIntensity;
                     }
                     
                     // === Fresnel Edge Effect ===
-                    // Glass edges appear brighter due to internal reflection
                     float edgeFactor = pow(distFromCenter * 1.8, fresnel);
                     edgeFactor = clamp(edgeFactor, 0.0, 1.0);
-                    
-                    // Smooth edge highlight following glass perimeter (white, not colored)
                     vec3 fresnelGlow = vec3(1.0) * edgeFactor * highlight * 0.6;
                     
+                    // === Specular Highlights ===
+                    vec3 lightDir = normalize(vec3(-0.3, -0.6, 0.8));
+                    float specular = pow(max(dot(normal, lightDir), 0.0), 48.0);
+                    float rimSpecular = pow(max(dot(normal, lightDir), 0.0), 12.0) * edgeFactor;
+                    vec3 specularColor = vec3(1.0, 0.98, 0.95) * (specular * 0.9 + rimSpecular * 0.5) * highlight;
+                    
                     // === Inner Highlight / Caustic Effect ===
-                    // Simulates light focusing through the lens
-                    float caustic = exp(-distFromCenter * distFromCenter * 6.0) * highlight * 0.3;
-                    
-                    // Secondary caustic ring
-                    float ring = smoothstep(0.3, 0.35, distFromCenter) * smoothstep(0.45, 0.4, distFromCenter);
-                    caustic += ring * highlight * 0.15;
-                    
-                    // === Edge Highlight Arc ===
-                    // Top-left light source creates arc highlight
-                    vec2 lightDir = normalize(vec2(-0.5, -0.7));
-                    // Add NORMALIZE_EPSILON to prevent NaN when delta is zero (at exact center)
-                    float lightAngle = dot(normalize(delta + vec2(NORMALIZE_EPSILON)), lightDir);
-                    float arcHighlight = pow(max(0.0, lightAngle), 3.0) * edgeFactor * highlight * 0.6;
+                    float caustic = exp(-distFromCenter * distFromCenter * 6.0) * highlight * 0.32;
+                    float ring = smoothstep(0.28, 0.35, distFromCenter) * smoothstep(0.5, 0.42, distFromCenter);
+                    caustic += ring * highlight * 0.18;
                     
                     // === Combine Effects ===
-                    // Base glass color with subtle tint
                     vec3 glassColor = mix(bgColor, tint.rgb, tintStr * 0.5);
-                    
-                    // Add edge dispersion rainbow tint
                     glassColor += dispersionTint;
-                    
-                    // Add fresnel edge glow (white)
                     glassColor += fresnelGlow;
-                    
-                    // Add caustic/inner highlights
                     glassColor += vec3(1.0) * caustic;
-                    
-                    // Add arc highlight
-                    glassColor += vec3(1.0, 0.98, 0.95) * arcHighlight;
+                    glassColor += specularColor;
                     
                     // === Glass Volume Opacity ===
-                    // Edges slightly more opaque (thicker glass)
-                    float volumeOpacity = opacity_ + edgeFactor * 0.15;
-                    
-                    // Center slightly more transparent (thinner/clearer)
-                    volumeOpacity -= (1.0 - distFromCenter) * 0.05;
+                    float volumeOpacity = opacity_ + edgeFactor * 0.18;
+                    volumeOpacity -= (1.0 - distFromCenter) * 0.06;
                     volumeOpacity = clamp(volumeOpacity, 0.1, 0.95);
                     
                     fragColor = vec4(glassColor, volumeOpacity) * qt_Opacity;
