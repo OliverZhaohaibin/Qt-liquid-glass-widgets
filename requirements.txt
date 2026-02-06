@@ -1,0 +1,4 @@
+# Liquid Glass Component Library Dependencies
+# Requires Qt 6.5+ for QtQuick.Effects / MultiEffect support
+
+PySide6>=6.5.0
